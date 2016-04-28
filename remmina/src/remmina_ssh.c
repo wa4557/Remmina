@@ -391,7 +391,7 @@ remmina_ssh_auth_gui (RemminaSSH *ssh, RemminaInitDialog *dialog)
 		if (ssh->auth != SSH_AUTH_AUTO_PUBLICKEY)
 		{
 			remmina_init_dialog_set_status (dialog, tips, ssh->user, ssh->server);
-			ret = remmina_init_dialog_authpwd (dialog, keyname, FALSE);
+			ret = remmina_init_dialog_authpwd (dialog, keyname, TRUE);
 
 			if (ret != GTK_RESPONSE_OK) return -1;
 		}
