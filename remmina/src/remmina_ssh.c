@@ -505,6 +505,7 @@ remmina_ssh_init_from_file (RemminaSSH *ssh, RemminaFile *remminafile)
 	const gchar *ssh_server;
 	const gchar *ssh_username;
 	const gchar *ssh_privatekey;
+	const gchar *password;
 	const gchar *server;
 	gchar *s;
 
@@ -518,6 +519,7 @@ remmina_ssh_init_from_file (RemminaSSH *ssh, RemminaFile *remminafile)
 	ssh_server = remmina_file_get_string (remminafile, "ssh_server");
 	ssh_username = remmina_file_get_string (remminafile, "ssh_username");
 	ssh_privatekey = remmina_file_get_string (remminafile, "ssh_privatekey");
+	password = remmina_file_get_secret (remminafile, "password");
 	server = remmina_file_get_string (remminafile, "server");
 	if (ssh_server)
 	{
@@ -540,7 +542,7 @@ remmina_ssh_init_from_file (RemminaSSH *ssh, RemminaFile *remminafile)
 	}
 
 	ssh->user = g_strdup (ssh_username ? ssh_username : g_get_user_name ());
-	ssh->password = NULL;
+	ssh->password = g_strdup (password ? password : NULL);
 	ssh->auth = remmina_file_get_int (remminafile, "ssh_auth", 0);
 	ssh->charset = g_strdup (remmina_file_get_string (remminafile, "ssh_charset"));
 
