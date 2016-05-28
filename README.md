@@ -7,7 +7,7 @@ Initially developed by [Vic Lee](https://github.com/llyzs)
 system administrators and travellers, who need to work with lots of remote
 computers in front of either large monitors or tiny netbooks. Remmina supports
 multiple network protocols in an integrated and consistant user interface.
-Currently RDP, VNC, NX, XDMCP and SSH are supported.
+Currently RDP, VNC, SPICE, NX, XDMCP and SSH are supported.
 
 Remmina is released in separated source packages:
 * "remmina", the main GTK+ application
@@ -85,7 +85,7 @@ If you rather prefer to contribute to Remmina with money you are more than welco
 
 For more informations See the [Remmina web site donation page](http://remmina.org/wp/donations).
 
-See the [THANKS.md](https://raw.githubusercontent.com/FreeRDP/Remmina/next/THANKS.md) file for an exaustive list of saupporters.
+See the [THANKS.md](https://raw.githubusercontent.com/FreeRDP/Remmina/next/THANKS.md) file for an exhaustive list of supporters.
 
 [![paypal](https://www.paypalobjects.com/en_US/CH/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=ZBD87JG52PTZC)
 
@@ -96,7 +96,7 @@ Remmina is maintained by:
  * [Antenore Gatta](https://github.com/antenore)
  * [Giovanni Panozzo](https://github.com/giox069)
 
-See the [AUTHORS](https://raw.githubusercontent.com/FreeRDP/Remmina/next/AUTHORS) for an exaustive list.
+See the [AUTHORS](https://raw.githubusercontent.com/FreeRDP/Remmina/next/AUTHORS) for an exhaustive list.
 If you are not listed and you have contributed, feel free to update that file.
 
 ## Resources
