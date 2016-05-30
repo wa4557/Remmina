@@ -403,6 +403,7 @@ remmina_ssh_auth_gui (RemminaSSH *ssh, RemminaInitDialog *dialog)
 		return 0;
 	}
 
+	/* TODO: Why 1, success should be 0? -1: Cancelled; 0: Failed; 1: Succeeded */
 	return 1;
 }
 

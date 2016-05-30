@@ -285,6 +285,7 @@ remmina_plugin_ssh_main_thread (gpointer data)
 				break;
 			}
 
+			/* TODO: Why 1, success should be 0? -1: Cancelled; 0: Failed; 1: Succeeded */
 			ret = remmina_ssh_auth_gui (REMMINA_SSH (shell),
 			                            REMMINA_INIT_DIALOG (remmina_protocol_widget_get_init_dialog (gp)));
 			if (ret == 0)
