@@ -38,21 +38,29 @@
 #  include <spice-client-gtk.h>
 #else
 #  include <spice-widget.h>
+#  include <usb-device-widget.h>
 #endif
+
+#define XSPICE_DEFAULT_PORT 5900
 
 #define GET_PLUGIN_DATA(gp) (RemminaPluginSpiceData*) g_object_get_data(G_OBJECT(gp), "plugin-data")
 
 enum
 {
 	REMMINA_PLUGIN_SPICE_FEATURE_PREF_VIEWONLY = 1,
+	REMMINA_PLUGIN_SPICE_FEATURE_PREF_DISABLECLIPBOARD,
 	REMMINA_PLUGIN_SPICE_FEATURE_TOOL_SENDCTRLALTDEL,
-	REMMINA_PLUGIN_SPICE_FEATURE_PREF_DISABLECLIPBOARD
+	REMMINA_PLUGIN_SPICE_FEATURE_TOOL_USBREDIR,
+	REMMINA_PLUGIN_SPICE_FEATURE_SCALE
 };
 
 typedef struct _RemminaPluginSpiceData
 {
+	SpiceAudio *audio;
 	SpiceDisplay *display;
+	SpiceDisplayChannel *display_channel;
 	SpiceGtkSession *gtk_session;
+	SpiceMainChannel *main_channel;
 	SpiceSession *session;
 } RemminaPluginSpiceData;
 
@@ -81,7 +89,7 @@ static void remmina_plugin_spice_init(RemminaProtocolWidget *gp)
 
 	remminafile = remmina_plugin_service->protocol_plugin_get_file(gp);
 	remmina_plugin_service->get_server_port(remmina_plugin_service->file_get_string(remminafile, "server"),
-	                                        5900,
+	                                        XSPICE_DEFAULT_PORT,
 	                                        &host,
 	                                        &port);
 
@@ -90,6 +98,8 @@ static void remmina_plugin_spice_init(RemminaProtocolWidget *gp)
 	             "port", g_strdup_printf("%i", port),
 	             "password", remmina_plugin_service->file_get_secret(remminafile, "password"),
 	             "read-only", remmina_plugin_service->file_get_int(remminafile, "viewonly", FALSE),
+	             "enable-audio", remmina_plugin_service->file_get_int(remminafile, "enableaudio", FALSE),
+	             "enable-smartcard", remmina_plugin_service->file_get_int(remminafile, "sharesmartcard", FALSE),
 	             NULL);
 
 	gpdata->gtk_session = spice_gtk_session_get(gpdata->session);
@@ -97,6 +107,8 @@ static void remmina_plugin_spice_init(RemminaProtocolWidget *gp)
 	             "auto-clipboard",
 	             !remmina_plugin_service->file_get_int(remminafile, "disableclipboard", FALSE),
 	             NULL);
+
+	g_free(host);
 }
 
 static gboolean remmina_plugin_spice_open_connection(RemminaProtocolWidget *gp)
@@ -121,7 +133,7 @@ static gboolean remmina_plugin_spice_close_connection(RemminaProtocolWidget *gp)
 
 	if (gpdata->session)
 	{
-		g_signal_handlers_disconnect_by_func(gpdata,
+		g_signal_handlers_disconnect_by_func(gpdata->main_channel,
 		                                     G_CALLBACK(remmina_plugin_spice_main_channel_event_cb),
 		                                     gp);
 		spice_session_disconnect(gpdata->session);
@@ -139,11 +151,13 @@ static void remmina_plugin_spice_channel_new_cb(SpiceSession *session, SpiceChan
 
 	gint id;
 	RemminaPluginSpiceData *gpdata = GET_PLUGIN_DATA(gp);
+	RemminaFile *remminafile = remmina_plugin_service->protocol_plugin_get_file(gp);
 
 	g_object_get(channel, "channel-id", &id, NULL);
 
 	if (SPICE_IS_MAIN_CHANNEL(channel))
 	{
+		gpdata->main_channel = SPICE_MAIN_CHANNEL(channel);
 		g_signal_connect(channel,
 		                 "channel-event",
 		                 G_CALLBACK(remmina_plugin_spice_main_channel_event_cb),
@@ -152,9 +166,21 @@ static void remmina_plugin_spice_channel_new_cb(SpiceSession *session, SpiceChan
 
 	if (SPICE_IS_DISPLAY_CHANNEL(channel))
 	{
+		gpdata->display_channel = SPICE_DISPLAY_CHANNEL(channel);
 		gpdata->display = spice_display_new(gpdata->session, id);
+		g_object_set(gpdata->display,
+		             "scaling", remmina_plugin_service->protocol_plugin_get_scale(gp),
+		             NULL);
 		gtk_container_add(GTK_CONTAINER(gp), GTK_WIDGET(gpdata->display));
 		gtk_widget_show(GTK_WIDGET(gpdata->display));
+	}
+
+	if (SPICE_IS_PLAYBACK_CHANNEL(channel))
+	{
+		if (remmina_plugin_service->file_get_int(remminafile, "enableaudio", FALSE))
+		{
+			gpdata->audio = spice_audio_get(gpdata->session, NULL);
+		}
 	}
 }
 
@@ -198,10 +224,11 @@ static void remmina_plugin_spice_main_channel_event_cb(SpiceChannel *channel, Sp
 	{
 		case SPICE_CHANNEL_CLOSED:
 			remmina_plugin_service->get_server_port(remmina_plugin_service->file_get_string(remminafile, "server"),
-			                                        5900,
+			                                        XSPICE_DEFAULT_PORT,
 			                                        &server,
 			                                        &port);
 			remmina_plugin_service->protocol_plugin_set_error(gp, _("Disconnected from SPICE server %s."), server);
+			g_free(server);
 			remmina_plugin_spice_close_connection(gp);
 			break;
 		case SPICE_CHANNEL_OPENED:
@@ -218,6 +245,8 @@ static void remmina_plugin_spice_main_channel_event_cb(SpiceChannel *channel, Sp
 				remmina_plugin_spice_close_connection(gp);
 			}
 			break;
+		case SPICE_CHANNEL_ERROR_TLS:
+		case SPICE_CHANNEL_ERROR_LINK:
 		case SPICE_CHANNEL_ERROR_CONNECT:
 			remmina_plugin_service->protocol_plugin_set_error(gp, _("Connection to SPICE server failed."));
 			remmina_plugin_spice_close_connection(gp);
@@ -252,6 +281,97 @@ static void remmina_plugin_spice_send_ctrlaltdel(RemminaProtocolWidget *gp)
 	remmina_plugin_spice_keystroke(gp, keys, G_N_ELEMENTS(keys));
 }
 
+static void remmina_plugin_spice_update_scale(RemminaProtocolWidget *gp)
+{
+	TRACE_CALL(__func__);
+
+	gint scale, width, height;
+	RemminaPluginSpiceData *gpdata = GET_PLUGIN_DATA(gp);
+	RemminaFile *remminafile = remmina_plugin_service->protocol_plugin_get_file(gp);
+
+	scale = remmina_plugin_service->file_get_int(remminafile, "scale", FALSE);
+	g_object_set(gpdata->display, "scaling", scale, NULL);
+
+	if (scale)
+	{
+		/* In scaled mode, the SpiceDisplay will get its dimensions from its parent */
+		gtk_widget_set_size_request(GTK_WIDGET(gpdata->display), -1, -1 );
+	}
+	else
+	{
+		/* In non scaled mode, the plugins forces dimensions of the SpiceDisplay */
+		g_object_get(gpdata->display_channel,
+		             "width", &width,
+		             "height", &height,
+		             NULL);
+		gtk_widget_set_size_request(GTK_WIDGET(gpdata->display), width, height);
+	}
+}
+
+static void remmina_plugin_spice_usb_connect_failed_cb(GObject *object, SpiceUsbDevice *usb_device, GError *error, RemminaProtocolWidget *gp)
+{
+	TRACE_CALL(__func__);
+
+	GtkWidget *dialog;
+
+	if (error->domain == G_IO_ERROR && error->code == G_IO_ERROR_CANCELLED)
+	{
+		return;
+	}
+
+	/*
+	 * FIXME: Use the RemminaConnectionWindow as transient parent widget
+	 * (and add the GTK_DIALOG_DESTROY_WITH_PARENT flag) if it becomes
+	 * accessible from the Remmina plugin API.
+	 */
+	dialog = gtk_message_dialog_new(NULL,
+	                                GTK_DIALOG_MODAL,
+	                                GTK_MESSAGE_ERROR,
+	                                GTK_BUTTONS_CLOSE,
+	                                _("USB redirection error"));
+	gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog),
+	                                         "%s",
+	                                         error->message);
+	gtk_dialog_run(GTK_DIALOG(dialog));
+	gtk_widget_destroy(dialog);
+}
+
+static void remmina_plugin_spice_select_usb_devices(RemminaProtocolWidget *gp)
+{
+	TRACE_CALL(__func__);
+
+	GtkWidget *dialog, *usb_device_widget;
+	RemminaPluginSpiceData *gpdata = GET_PLUGIN_DATA(gp);
+
+	/*
+	 * FIXME: Use the RemminaConnectionWindow as transient parent widget
+	 * (and add the GTK_DIALOG_DESTROY_WITH_PARENT flag) if it becomes
+	 * accessible from the Remmina plugin API.
+	 */
+	dialog = gtk_dialog_new_with_buttons(_("Select USB devices for redirection"),
+	                                     NULL,
+	                                     GTK_DIALOG_MODAL,
+	                                     _("_Close"),
+	                                     GTK_RESPONSE_ACCEPT,
+	                                     NULL);
+	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
+
+	usb_device_widget = spice_usb_device_widget_new(gpdata->session, NULL);
+	g_signal_connect(usb_device_widget,
+	                 "connect-failed",
+	                 G_CALLBACK(remmina_plugin_spice_usb_connect_failed_cb),
+	                 gp);
+
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))),
+			   usb_device_widget,
+			   TRUE,
+			   TRUE,
+			   0);
+	gtk_widget_show_all(dialog);
+	gtk_dialog_run(GTK_DIALOG(dialog));
+	gtk_widget_destroy(dialog);
+}
+
 static gboolean remmina_plugin_spice_query_feature(RemminaProtocolWidget *gp, const RemminaProtocolFeature *feature)
 {
 	TRACE_CALL(__func__);
@@ -262,6 +382,7 @@ static gboolean remmina_plugin_spice_query_feature(RemminaProtocolWidget *gp, co
 static void remmina_plugin_spice_call_feature(RemminaProtocolWidget *gp, const RemminaProtocolFeature *feature)
 {
 	TRACE_CALL(__func__);
+
 	RemminaPluginSpiceData *gpdata = GET_PLUGIN_DATA(gp);
 	RemminaFile *remminafile = remmina_plugin_service->protocol_plugin_get_file(gp);
 
@@ -273,14 +394,20 @@ static void remmina_plugin_spice_call_feature(RemminaProtocolWidget *gp, const R
 			             remmina_plugin_service->file_get_int(remminafile, "viewonly", FALSE),
 			             NULL);
 			break;
-		case REMMINA_PLUGIN_SPICE_FEATURE_TOOL_SENDCTRLALTDEL:
-			remmina_plugin_spice_send_ctrlaltdel(gp);
-			break;
 		case REMMINA_PLUGIN_SPICE_FEATURE_PREF_DISABLECLIPBOARD:
 			g_object_set(gpdata->gtk_session,
 			             "auto-clipboard",
 			             !remmina_plugin_service->file_get_int(remminafile, "disableclipboard", FALSE),
 			             NULL);
+			break;
+		case REMMINA_PLUGIN_SPICE_FEATURE_SCALE:
+			remmina_plugin_spice_update_scale(gp);
+			break;
+		case REMMINA_PLUGIN_SPICE_FEATURE_TOOL_SENDCTRLALTDEL:
+			remmina_plugin_spice_send_ctrlaltdel(gp);
+			break;
+		case REMMINA_PLUGIN_SPICE_FEATURE_TOOL_USBREDIR:
+			remmina_plugin_spice_select_usb_devices(gp);
 			break;
 		default:
 			break;
@@ -317,6 +444,8 @@ static const RemminaProtocolSetting remmina_plugin_spice_advanced_settings[] =
 	{ REMMINA_PROTOCOL_SETTING_TYPE_CHECK, "viewonly", N_("View only"), FALSE, NULL, NULL },
 	{ REMMINA_PROTOCOL_SETTING_TYPE_CHECK, "disableclipboard", N_("Disable clipboard sync"), FALSE, NULL, NULL },
 	{ REMMINA_PROTOCOL_SETTING_TYPE_CHECK, "disablepasswordstoring", N_("Disable password storing"), FALSE, NULL, NULL },
+	{ REMMINA_PROTOCOL_SETTING_TYPE_CHECK, "enableaudio", N_("Enable audio channel"), FALSE, NULL, NULL },
+	{ REMMINA_PROTOCOL_SETTING_TYPE_CHECK, "sharesmartcard", N_("Share smartcard"), FALSE, NULL, NULL },
 	{ REMMINA_PROTOCOL_SETTING_TYPE_END, NULL, NULL, FALSE, NULL, NULL }
 };
 
@@ -325,8 +454,10 @@ static const RemminaProtocolSetting remmina_plugin_spice_advanced_settings[] =
 static const RemminaProtocolFeature remmina_plugin_spice_features[] =
 {
 	{ REMMINA_PROTOCOL_FEATURE_TYPE_PREF, REMMINA_PLUGIN_SPICE_FEATURE_PREF_VIEWONLY, GINT_TO_POINTER(REMMINA_PROTOCOL_FEATURE_PREF_CHECK), "viewonly", N_("View only") },
-	{ REMMINA_PROTOCOL_FEATURE_TYPE_TOOL, REMMINA_PLUGIN_SPICE_FEATURE_TOOL_SENDCTRLALTDEL, N_("Send Ctrl+Alt+Delete"), NULL, NULL },
 	{ REMMINA_PROTOCOL_FEATURE_TYPE_PREF, REMMINA_PLUGIN_SPICE_FEATURE_PREF_DISABLECLIPBOARD, GINT_TO_POINTER(REMMINA_PROTOCOL_FEATURE_PREF_CHECK), "disableclipboard", N_("Disable clipboard sync") },
+	{ REMMINA_PROTOCOL_FEATURE_TYPE_TOOL, REMMINA_PLUGIN_SPICE_FEATURE_TOOL_SENDCTRLALTDEL, N_("Send Ctrl+Alt+Delete"), NULL, NULL },
+	{ REMMINA_PROTOCOL_FEATURE_TYPE_TOOL, REMMINA_PLUGIN_SPICE_FEATURE_TOOL_USBREDIR, N_("Select USB devices for redirection"), NULL, NULL },
+	{ REMMINA_PROTOCOL_FEATURE_TYPE_SCALE, REMMINA_PLUGIN_SPICE_FEATURE_SCALE, NULL, NULL, NULL },
 	{ REMMINA_PROTOCOL_FEATURE_TYPE_END, 0, NULL, NULL, NULL }
 };
 
